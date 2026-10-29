@@ -92,9 +92,8 @@ local function GetParentGui()
 	end
 	return LocalPlayer:WaitForChild("PlayerGui")
 end
--- Forward-declare Settings / isInMatch so closures defined inside CreateWindow can capture them
+-- Forward declare Settings so closures defined inside CreateWindow can capture it
 local Settings
-local isInMatch
 
 local Library = { Flags = {}, Icons = Icons, Theme = Theme, ToggleKey = Enum.KeyCode.Insert, __notifyHolder = nil }
 Library.__index = Library
@@ -268,14 +267,14 @@ function Library:CreateWindow(cfg)
 	end
 	Window.SetMenuOpen = setMenuOpen
 	Window.IsMenuOpen = function() return menuOpen end
-	
-	-- Always allow the toggle key to open/close the menu (no "disabled in match" check)
+
+	-- Always allow the toggle key; no "disabled in match" guard
 	UserInputService.InputBegan:Connect(function(input, gp)
 		if not gp and input.KeyCode == Library.ToggleKey then
 			setMenuOpen(not menuOpen)
 		end
 	end)
-	
+
 	RunService.RenderStepped:Connect(function()
 		if not main or not main.Parent then return end
 		if menuOpen then
@@ -642,96 +641,40 @@ local Window
 local _unloaded = false
 
 -- ============================================================
--- AUTO-RELOAD
+-- CROSS-PLACE AUTO-RELOAD (queue_on_teleport)
+-- Bakes _G.SKIDWARE_URL into the primed script because _G is wiped
+-- when the client changes places. Re-primes every 4s while enabled.
 -- ============================================================
-local _getSelfSource = function()
-    if type(_G.SKIDWARE_SOURCE) == "string" and #_G.SKIDWARE_SOURCE > 0 then return _G.SKIDWARE_SOURCE end
-    if type(_G.SKIDWARE_URL) == "string" and #_G.SKIDWARE_URL > 0 then
-        local ok, src = pcall(function() return game:HttpGet(_G.SKIDWARE_URL) end)
-        if ok and type(src) == "string" and #src > 0 then return src end
-    end
-    return nil
+local function _buildPrimedScript()
+	if type(_G.SKIDWARE_URL) == "string" and #_G.SKIDWARE_URL > 0 then
+		return '_G.SKIDWARE_URL = ' .. string.format("%q", _G.SKIDWARE_URL)
+			.. '\nloadstring(game:HttpGet(_G.SKIDWARE_URL))()'
+	end
+	return nil
 end
 
-local _lastReloadTime = 0
-local _tryReload
-
-local _scheduleReload = function(reason)
-    local now = os.clock()
-    if now - _lastReloadTime < 5 then return end
-    _lastReloadTime = now
-    task.spawn(function()
-        Library:Notify({ Title = "SKIDWARE", Text = "Reloading (" .. tostring(reason or "auto") .. ")…", Duration = 2 })
-        task.wait(1)
-        _tryReload()
-    end)
+local _lastPrimeTime = 0
+local function _primeTeleportQueue(force)
+	if not (Settings and Settings.autoReloadEnabled) then return end
+	if type(queue_on_teleport) ~= "function" then
+		if force then
+			Library:Notify({ Title = "SKIDWARE", Text = "queue_on_teleport not available in this executor", Duration = 4 })
+		end
+		return
+	end
+	local now = os.clock()
+	if not force and now - _lastPrimeTime < 4 then return end
+	_lastPrimeTime = now
+	local src = _buildPrimedScript()
+	if not src then return end
+	pcall(queue_on_teleport, src)
 end
 
-_tryReload = function()
-    if not Settings or not Settings.autoReloadEnabled then return false end
-    if type(_G.__SKIDWARE_UNLOAD) == "function" then pcall(_G.__SKIDWARE_UNLOAD) end
-    local src = _getSelfSource()
-    if src then
-        local fn, err = loadstring(src)
-        if fn then
-            task.spawn(function()
-                local ok, err2 = pcall(fn)
-                if not ok then warn("[SKIDWARE] reload execute error: " .. tostring(err2)) end
-            end)
-            return true
-        end
-        warn("[SKIDWARE] reload loadstring failed: " .. tostring(err))
-    end
-    if queue_on_teleport and type(_G.SKIDWARE_URL) == "string" and #_G.SKIDWARE_URL > 0 then
-        queue_on_teleport(('loadstring(game:HttpGet(%q))()'):format(_G.SKIDWARE_URL))
-        return true
-    end
-    Library:Notify({
-        Title = "SKIDWARE",
-        Text = "Auto-reload: set _G.SKIDWARE_URL or _G.SKIDWARE_SOURCE in your loader.",
-        Duration = 6,
-    })
-    return false
-end
-
--- Baseline unload hook (replaced by _performUnload at the bottom of the file)
-_G.__SKIDWARE_UNLOAD = function() _unloaded = true end
-
--- Reload trigger 1: PlayerTeleported from MatchMapService (fires when the game
--- moves you into an arena / match)
 task.spawn(function()
-    local RS = game:GetService("ReplicatedStorage")
-    local Packages = RS:WaitForChild("Packages", 15)
-    if not Packages then return end
-    local commMod = Packages:WaitForChild("comm", 5)
-    if not commMod then return end
-    local ok, comm = pcall(require, commMod)
-    if not ok then return end
-    local ok2, svc = pcall(function() return comm.ClientComm.new(RS, true, "MatchMapService") end)
-    if not ok2 or not svc then return end
-    local ok3, sig = pcall(function() return svc:GetSignal("PlayerTeleported") end)
-    if not ok3 or not sig then return end
-    sig:Connect(function()
-        if Settings and Settings.autoReloadEnabled then
-            _scheduleReload("teleport")
-        end
-    end)
-end)
-
--- Reload trigger 2: Match state transitions into InProgress / Waiting
-task.spawn(function()
-    local w = 0
-    while not MatchController and w < 30 do task.wait(0.2); w += 0.2 end
-    if not MatchController then return end
-    local ok, sig = pcall(function() return MatchController.LocalMatchStateChanged end)
-    if not ok or not sig then return end
-    sig:Connect(function(newState, oldState)
-        if not (Settings and Settings.autoReloadEnabled) then return end
-        if oldState == newState then return end
-        if newState == "InProgress" or newState == "Waiting" then
-            _scheduleReload("match:" .. tostring(newState))
-        end
-    end)
+	while not _unloaded do
+		task.wait(4)
+		_primeTeleportQueue(false)
+	end
 end)
 -- ============================================================
 
@@ -1261,14 +1204,6 @@ local function hasClearLine(camPos, targetPos, targetChar)
 	end
 	return remaining < 1
 end
-local function isCharVisibleAny(character, camPos)
-	local head = character:FindFirstChild("Head") or character:FindFirstChild("FakeHead")
-	if head and hasClearLine(camPos, head.Position, character) then return true end
-	local ut = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso") or character:FindFirstChild("FakeBody")
-	if ut and hasClearLine(camPos, ut.Position, character) then return true end
-	local lt = character:FindFirstChild("LowerTorso"); if lt and hasClearLine(camPos, lt.Position, character) then return true end
-	return false
-end
 local function isCharVisibleMulti(character, camPos)
 	local parts = {}
 	local head = character:FindFirstChild("Head") or character:FindFirstChild("FakeHead"); if head then parts[#parts+1] = head end
@@ -1356,16 +1291,6 @@ local function fireRightClick()
 	if _unloaded then return end
 	if Window and Window.IsMenuOpen and Window.IsMenuOpen() then return end
 	if mouse2click then pcall(mouse2click) end
-end
-
-isInMatch = function()
-	if MatchController then
-		local ok, data = pcall(function() return MatchController:GetActiveMatchData() end)
-		if ok and data and (data.state == "InProgress" or data.state == "Waiting" or data.state == "RoundEnded") then
-			return true
-		end
-	end
-	return false
 end
 
 local targetSeenTime, currentTarget = 0, nil
@@ -1716,37 +1641,34 @@ Callback = function(v) Settings.animTestName = v; saveSettings(); if Settings.an
 ag:AddCheckbox({ Name = "Loop", Default = Settings.animTestLoop, Flag = "an_loop",
 Callback = function(v) Settings.animTestLoop = v; saveSettings(); if v then playReplicatedAnim() else stopReplicatedAnim() end end })
 
--- Settings menu — height bumped from 140 to 200 so the Unload button is not clipped
-local mg = SettingsMenu:AddGroup("Menu", Icons.hammer, "Left", 200)
+-- Settings menu — height 175 so Unload button isn't clipped
+local mg = SettingsMenu:AddGroup("Menu", Icons.hammer, "Left", 175)
 mg:AddLabel("Toggle key: RightShift")
 mg:AddLabel("Unload restores everything.")
 mg:AddCheckbox({ Name = "Auto Reload", Default = Settings.autoReloadEnabled, Flag = "set_autoreload",
-Callback = function(v) 
+Callback = function(v)
 	Settings.autoReloadEnabled = v; saveSettings()
 	if v then
-		if not _G.SKIDWARE_URL and not _G.SKIDWARE_SOURCE then
-			Library:Notify({ Title = "SKIDWARE", Text = "Set _G.SKIDWARE_URL before loading for reload to work!", Duration = 6 })
+		if not _G.SKIDWARE_URL then
+			Library:Notify({ Title = "SKIDWARE", Text = "Set _G.SKIDWARE_URL before loading!", Duration = 6 })
 		else
-			Library:Notify({ Title = "SKIDWARE", Text = "Auto Reload enabled", Duration = 3 })
+			_primeTeleportQueue(true)
+			Library:Notify({ Title = "SKIDWARE", Text = "Auto Reload armed (loads on cross-place teleport)", Duration = 4 })
 		end
+	else
+		_lastPrimeTime = 0
 	end
 end })
 mg:AddButton({ Name = "Force Save", Callback = function()
 	saveSettings()
 	Library:Notify({ Title = "SKIDWARE", Text = "Settings force saved", Duration = 3 })
 end })
-mg:AddButton({ Name = "Reload Now", Callback = function()
-	Library:Notify({ Title = "SKIDWARE", Text = "Reloading…", Duration = 2 })
-	task.wait(0.6)
-	_tryReload()
-end })
 mg:AddButton({ Name = "Unload", Callback = function()
 	_performUnload()
 end })
 
 -- ============================================================
--- Full unload routine + install as _G.__SKIDWARE_UNLOAD so the
--- auto-reload hook can cleanly stop this instance before re-executing.
+-- Full unload routine — used by the Unload button
 -- ============================================================
 function _performUnload()
 	if _unloaded then return end
@@ -1773,7 +1695,6 @@ function _performUnload()
 		if Window then Window:Destroy() end
 	end)
 end
-_G.__SKIDWARE_UNLOAD = _performUnload
 
 task.spawn(function()
 	local w = 0
