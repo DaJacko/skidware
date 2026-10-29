@@ -1,3 +1,10 @@
+-- Guard against duplicate loads from stacked queue_on_teleport entries
+if _G.__SKIDWARE_JOB and _G.__SKIDWARE_JOB[game.JobId] and os.clock() - _G.__SKIDWARE_JOB[game.JobId] < 3 then
+	return
+end
+if not _G.__SKIDWARE_JOB then _G.__SKIDWARE_JOB = {} end
+_G.__SKIDWARE_JOB[game.JobId] = os.clock()
+
 local Icons = {
 	crosshairs = "rbxassetid://96677288280405", ghost      = "rbxassetid://95400397758754",
 	mouse      = "rbxassetid://74350468513068", user       = "rbxassetid://97066657594742",
@@ -37,7 +44,6 @@ local RunService       = game:GetService("RunService")
 local Lighting         = game:GetService("Lighting")
 
 -- queue_on_teleport can execute before the client has set Players.LocalPlayer.
--- If we cache it too early it stays nil forever, so wait for it first.
 if not Players.LocalPlayer then
 	local _timeout = os.clock() + 30
 	while not Players.LocalPlayer do
@@ -105,7 +111,6 @@ local function GetParentGui()
 	end
 	return LocalPlayer:WaitForChild("PlayerGui")
 end
--- Forward declare Settings so closures defined inside CreateWindow can capture it
 local Settings
 
 local Library = { Flags = {}, Icons = Icons, Theme = Theme, ToggleKey = Enum.KeyCode.Insert, __notifyHolder = nil }
@@ -663,7 +668,6 @@ local function _buildPrimedScript()
 	return nil
 end
 
-local _lastPrimeTime = 0
 local function _primeTeleportQueue(force)
 	if not (Settings and Settings.autoReloadEnabled) then return end
 	if type(queue_on_teleport) ~= "function" then
@@ -672,20 +676,10 @@ local function _primeTeleportQueue(force)
 		end
 		return
 	end
-	local now = os.clock()
-	if not force and now - _lastPrimeTime < 4 then return end
-	_lastPrimeTime = now
 	local src = _buildPrimedScript()
 	if not src then return end
 	pcall(queue_on_teleport, src)
 end
-
-task.spawn(function()
-	while not _unloaded do
-		task.wait(4)
-		_primeTeleportQueue(false)
-	end
-end)
 -- ============================================================
 
 local _loadStart = os.clock()
@@ -1664,8 +1658,6 @@ Callback = function(v)
 			_primeTeleportQueue(true)
 			Library:Notify({ Title = "SKIDWARE", Text = "Auto Reload armed (loads on cross-place teleport)", Duration = 4 })
 		end
-	else
-		_lastPrimeTime = 0
 	end
 end })
 mg:AddButton({ Name = "Force Save", Callback = function()
@@ -1722,4 +1714,9 @@ task.spawn(function()
 		Text = ("Loaded in %.2fs"):format(os.clock() - _loadStart),
 		Duration = 4,
 	})
+	-- Re-arm the teleport queue for the NEXT cross-place teleport
+	if Settings.autoReloadEnabled then
+		task.wait(0.2)
+		_primeTeleportQueue(true)
+	end
 end)
