@@ -35,7 +35,20 @@ local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local RunService       = game:GetService("RunService")
 local Lighting         = game:GetService("Lighting")
+
+-- queue_on_teleport can execute before the client has set Players.LocalPlayer.
+-- If we cache it too early it stays nil forever, so wait for it first.
+if not Players.LocalPlayer then
+	local _timeout = os.clock() + 30
+	while not Players.LocalPlayer do
+		task.wait(0.1)
+		if os.clock() > _timeout then
+			error("[SKIDWARE] Timed out waiting for Players.LocalPlayer")
+		end
+	end
+end
 local LocalPlayer      = Players.LocalPlayer
+
 local function rgbf(r, g, b) return Color3.new(r, g, b) end
 local Theme = {
 	Accent = rgbf(0.784, 0.157, 0.745), Text = rgbf(1, 1, 1), TextDisabled = rgbf(0.55, 0.50, 0.58),
@@ -268,7 +281,6 @@ function Library:CreateWindow(cfg)
 	Window.SetMenuOpen = setMenuOpen
 	Window.IsMenuOpen = function() return menuOpen end
 
-	-- Always allow the toggle key; no "disabled in match" guard
 	UserInputService.InputBegan:Connect(function(input, gp)
 		if not gp and input.KeyCode == Library.ToggleKey then
 			setMenuOpen(not menuOpen)
@@ -642,8 +654,6 @@ local _unloaded = false
 
 -- ============================================================
 -- CROSS-PLACE AUTO-RELOAD (queue_on_teleport)
--- Bakes _G.SKIDWARE_URL into the primed script because _G is wiped
--- when the client changes places. Re-primes every 4s while enabled.
 -- ============================================================
 local function _buildPrimedScript()
 	if type(_G.SKIDWARE_URL) == "string" and #_G.SKIDWARE_URL > 0 then
@@ -1641,7 +1651,6 @@ Callback = function(v) Settings.animTestName = v; saveSettings(); if Settings.an
 ag:AddCheckbox({ Name = "Loop", Default = Settings.animTestLoop, Flag = "an_loop",
 Callback = function(v) Settings.animTestLoop = v; saveSettings(); if v then playReplicatedAnim() else stopReplicatedAnim() end end })
 
--- Settings menu — height 175 so Unload button isn't clipped
 local mg = SettingsMenu:AddGroup("Menu", Icons.hammer, "Left", 175)
 mg:AddLabel("Toggle key: RightShift")
 mg:AddLabel("Unload restores everything.")
@@ -1667,9 +1676,6 @@ mg:AddButton({ Name = "Unload", Callback = function()
 	_performUnload()
 end })
 
--- ============================================================
--- Full unload routine — used by the Unload button
--- ============================================================
 function _performUnload()
 	if _unloaded then return end
 	_unloaded = true
