@@ -730,9 +730,18 @@ local GAME_HIGHLIGHT_NAMES = { MatchTeammateHighlight = true, MatchEnemyHighligh
 local function colorToTable(c) return { math.floor(c.R*255+0.5), math.floor(c.G*255+0.5), math.floor(c.B*255+0.5) } end
 local function tableToColor(t) if type(t) == "table" and #t >= 3 then return Color3.fromRGB(t[1], t[2], t[3]) end return Color3.new(1, 1, 1) end
 
+-- ============================================================
+-- DEFAULT SETTINGS (applied only on first launch — a saved file
+-- overrides everything below once the user changes anything)
+-- ============================================================
 Settings = {
-	triggerbotEnabled = true, reactionTime = 0, maxDistance = 2000, teamCheck = true,
-	losIgnoreGlass = true, visibilityCheck = true,
+	-- Core triggerbot: off by default so new users don't fire
+	-- right-clicks before they've even opened the menu
+	triggerbotEnabled = false,
+	reactionTime = 0, maxDistance = 2000,
+	-- Safety helpers (only active once triggerbot is enabled):
+	teamCheck = true, losIgnoreGlass = true, visibilityCheck = true,
+	-- Everything else: off by default
 	undergroundEnabled = false, undergroundDepth = 2.0, undergroundPlayAnim = true,
 	disableFovPunch = false, disableCameraShake = false, noBloodHudEnabled = false,
 	chamsEnabled = false, chamsFillAlpha = 0.5, chamsMaxDistance = 500,
@@ -775,7 +784,8 @@ Settings.chamsFillAlpha        = math.clamp(tonumber(Settings.chamsFillAlpha) or
 Settings.earrapeInterval       = math.clamp(tonumber(Settings.earrapeInterval) or 100, 0, 500)
 Settings.earrapeBurst          = math.clamp(tonumber(Settings.earrapeBurst) or 10, 1, 100)
 Settings.viewmodelTransparency = math.clamp(tonumber(Settings.viewmodelTransparency) or 0, 0, 1)
-Settings.undergroundDepth      = math.clamp(tonumber(Settings.undergroundDepth) or 2.0, 0.5, 20)
+-- Underground depth cap: 6 studs (was 20) — both the slider and this clamp enforce it
+Settings.undergroundDepth      = math.clamp(tonumber(Settings.undergroundDepth) or 2.0, 0.5, 6)
 
 local function fastChild(parent, name, timeout)
 	if not parent then return nil end
@@ -1607,7 +1617,8 @@ Callback = function(v) Settings.earrapeBurst = v; saveSettings() end })
 local ug = CombatExtra:AddGroup("Underground AA", Icons.ghost, "Right", 140)
 ug:AddCheckbox({ Name = "Enable Underground AA", Default = Settings.undergroundEnabled, Flag = "ug_enabled",
 Callback = function(v) setUndergroundEnabled(v) end })
-ug:AddSlider({ Name = "Depth", Default = Settings.undergroundDepth, Min = 0.5, Max = 20, Decimals = 1, Suffix = " studs", Flag = "ug_depth",
+-- Max capped at 6 studs (was 20)
+ug:AddSlider({ Name = "Depth", Default = Settings.undergroundDepth, Min = 0.5, Max = 6, Decimals = 1, Suffix = " studs", Flag = "ug_depth",
 Callback = function(v) Settings.undergroundDepth = v; saveSettings() end })
 ug:AddCheckbox({ Name = "Play Slide Anim", Default = Settings.undergroundPlayAnim, Flag = "ug_anim",
 Callback = function(v) Settings.undergroundPlayAnim = v; saveSettings()
@@ -1743,5 +1754,28 @@ task.spawn(function()
 	if Settings.autoReloadEnabled then
 		task.wait(0.2)
 		_primeTeleportQueue(true)
+	end
+end)
+
+-- ============================================================
+-- FIRST-TIME USER HINT
+-- Shows "Press RightShift..." once per user, tracked by a file
+-- on disk so it never appears again after the first run.
+-- ============================================================
+task.spawn(function()
+	local HINT_FILE = "skidware_hint_seen.txt"
+	local hasSeenHint = false
+	if isfile then
+		local ok, result = pcall(isfile, HINT_FILE)
+		hasSeenHint = ok and result == true
+	end
+	if not hasSeenHint then
+		task.wait(1.2)
+		Library:Notify({
+			Title = "SKIDWARE",
+			Text = "Press RightShift to toggle the menu. Settings: Misc > Menu.",
+			Duration = 8,
+		})
+		if writefile then pcall(writefile, HINT_FILE, tostring(os.time())) end
 	end
 end)
