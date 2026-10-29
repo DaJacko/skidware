@@ -1,3 +1,10 @@
+
+if game.GameId ~= 9641502068 then
+	return
+end
+
+
+
 -- ============================================================
 -- ROBUST DUPLICATE-LOAD GUARD
 -- Survives _G resets across script executions by using a
