@@ -1,9 +1,34 @@
--- Guard against duplicate loads from stacked queue_on_teleport entries
-if _G.__SKIDWARE_JOB and _G.__SKIDWARE_JOB[game.JobId] and os.clock() - _G.__SKIDWARE_JOB[game.JobId] < 3 then
+-- ============================================================
+-- ROBUST DUPLICATE-LOAD GUARD
+-- Survives _G resets across script executions by using a
+-- persistent Instance marker in Lighting (local-only, but that's
+-- all we need — it's shared across scripts on the same client).
+-- ============================================================
+local _GUARD_INSTANCE_NAME = "__SkidwareLoadGuard"
+local _now = os.clock()
+do
+	local LightingSvc = game:GetService("Lighting")
+	local guard = LightingSvc:FindFirstChild(_GUARD_INSTANCE_NAME)
+	if guard and guard:IsA("NumberValue") then
+		local prev = tonumber(guard.Value) or 0
+		if _now - prev < 3 then
+			return
+		end
+		guard.Value = _now
+	else
+		if guard then guard:Destroy() end
+		local v = Instance.new("NumberValue")
+		v.Name = _GUARD_INSTANCE_NAME
+		v.Value = _now
+		v.Parent = LightingSvc
+	end
+end
+-- Also check _G in case the Instance marker somehow got deleted
+if _G.__SKIDWARE_JOB and _G.__SKIDWARE_JOB[game.JobId] and _now - _G.__SKIDWARE_JOB[game.JobId] < 3 then
 	return
 end
 if not _G.__SKIDWARE_JOB then _G.__SKIDWARE_JOB = {} end
-_G.__SKIDWARE_JOB[game.JobId] = os.clock()
+_G.__SKIDWARE_JOB[game.JobId] = _now
 
 local Icons = {
 	crosshairs = "rbxassetid://96677288280405", ghost      = "rbxassetid://95400397758754",
