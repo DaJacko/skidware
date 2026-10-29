@@ -1,4 +1,3 @@
-
 if game.GameId ~= 9641502068 then
 	return
 end
@@ -242,9 +241,9 @@ function Library:CreateWindow(cfg)
 	Panel(170, 61, 520, 439, -10, -10, 10, 10, 0)
 	local title = cfg.Title or "NEVERLOSE"
 	Label({ Text = title, Font = Theme.FontBold, TextSize = 26, TextColor3 = Theme.Accent, Size = UDim2.fromOffset(170, 30),
-	Position = UDim2.fromOffset(15, 17), Parent = main })
+		Position = UDim2.fromOffset(15, 17), Parent = main })
 	Label({ Text = title, Font = Theme.FontBold, TextSize = 26, TextColor3 = Theme.Text, Size = UDim2.fromOffset(170, 30),
-	Position = UDim2.fromOffset(14, 17), Parent = main })
+		Position = UDim2.fromOffset(14, 17), Parent = main })
 	New("Frame", { Size = UDim2.fromOffset(170, 1), Position = UDim2.fromOffset(0, 450),
 	BackgroundColor3 = Theme.WindowBg, BackgroundTransparency = 0.5, BorderSizePixel = 0, Parent = main })
 	local av = New("ImageLabel", { Size = UDim2.fromOffset(30, 30), Position = UDim2.fromOffset(15, 460),
@@ -742,13 +741,9 @@ local function tableToColor(t) if type(t) == "table" and #t >= 3 then return Col
 -- overrides everything below once the user changes anything)
 -- ============================================================
 Settings = {
-	-- Core triggerbot: off by default so new users don't fire
-	-- right-clicks before they've even opened the menu
 	triggerbotEnabled = false,
 	reactionTime = 0, maxDistance = 2000,
-	-- Safety helpers (only active once triggerbot is enabled):
 	teamCheck = true, losIgnoreGlass = true, visibilityCheck = true,
-	-- Everything else: off by default
 	undergroundEnabled = false, undergroundDepth = 2.0, undergroundPlayAnim = true,
 	disableFovPunch = false, disableCameraShake = false, noBloodHudEnabled = false,
 	chamsEnabled = false, chamsFillAlpha = 0.5, chamsMaxDistance = 500,
@@ -791,7 +786,6 @@ Settings.chamsFillAlpha        = math.clamp(tonumber(Settings.chamsFillAlpha) or
 Settings.earrapeInterval       = math.clamp(tonumber(Settings.earrapeInterval) or 100, 0, 500)
 Settings.earrapeBurst          = math.clamp(tonumber(Settings.earrapeBurst) or 10, 1, 100)
 Settings.viewmodelTransparency = math.clamp(tonumber(Settings.viewmodelTransparency) or 0, 0, 1)
--- Underground depth cap: 6 studs (was 20) — both the slider and this clamp enforce it
 Settings.undergroundDepth      = math.clamp(tonumber(Settings.undergroundDepth) or 2.0, 0.5, 6)
 
 local function fastChild(parent, name, timeout)
@@ -921,6 +915,12 @@ task.spawn(function()
 	if Settings.noBloodHudEnabled then scanForBloodHuds() end
 end)
 
+-- ===== UNDERGROUND AA =====
+-- Replaced from UNDERGROUND AA reference. The old `UndergroundCamFix` step
+-- (Camera.Value + 1) was double-compensating: Heartbeat already pushes
+-- CameraOffset up by `undergroundDepth` while burying HumanoidRootPart by
+-- the same amount, so the camera renders at the correct height. The extra
+-- +depth in CamFix was pushing the camera ABOVE the character. Removed.
 local _undergroundSavedCF, _undergroundSavedVel, _undergroundSavedCamOffset, _undergroundAnimTrack
 local function getUndergroundRoot() local char = LocalPlayer.Character; return char and char:FindFirstChild("HumanoidRootPart") end
 local function stopUndergroundAnim()
@@ -959,11 +959,9 @@ RunService.Heartbeat:Connect(function()
 		hum.CameraOffset = _undergroundSavedCamOffset + Vector3.new(0, Settings.undergroundDepth, 0)
 	end)
 end)
-RunService:BindToRenderStep("UndergroundCamFix", Enum.RenderPriority.Camera.Value + 1, function()
-	if _unloaded or not Settings.undergroundEnabled or not _undergroundSavedCF then return end
-	local cam = Workspace.CurrentCamera
-	if cam then pcall(function() cam.CFrame = cam.CFrame + Vector3.new(0, Settings.undergroundDepth, 0) end) end
-end)
+-- NOTE: UndergroundCamFix removed. It was the source of the "camera shifts
+-- up but the character doesn't go under" bug — it added +depth on top of the
+-- already-Offset camera, pushing it ABOVE the character's expected eye line.
 RunService:BindToRenderStep("UndergroundAARestore", Enum.RenderPriority.Camera.Value + 5, function()
 	if _unloaded or not Settings.undergroundEnabled or not _undergroundSavedCF then return end
 	local root = getUndergroundRoot(); if root then pcall(function() root.CFrame = _undergroundSavedCF end) end
@@ -1624,7 +1622,6 @@ Callback = function(v) Settings.earrapeBurst = v; saveSettings() end })
 local ug = CombatExtra:AddGroup("Underground AA", Icons.ghost, "Right", 140)
 ug:AddCheckbox({ Name = "Enable Underground AA", Default = Settings.undergroundEnabled, Flag = "ug_enabled",
 Callback = function(v) setUndergroundEnabled(v) end })
--- Max capped at 6 studs (was 20)
 ug:AddSlider({ Name = "Depth", Default = Settings.undergroundDepth, Min = 0.5, Max = 6, Decimals = 1, Suffix = " studs", Flag = "ug_depth",
 Callback = function(v) Settings.undergroundDepth = v; saveSettings() end })
 ug:AddCheckbox({ Name = "Play Slide Anim", Default = Settings.undergroundPlayAnim, Flag = "ug_anim",
@@ -1757,7 +1754,6 @@ task.spawn(function()
 		Text = ("Loaded in %.2fs"):format(os.clock() - _loadStart),
 		Duration = 4,
 	})
-	-- Re-arm the teleport queue for the NEXT cross-place teleport
 	if Settings.autoReloadEnabled then
 		task.wait(0.2)
 		_primeTeleportQueue(true)
